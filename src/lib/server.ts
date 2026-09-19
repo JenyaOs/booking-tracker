@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { getDb } from "@/lib/db";
 import { bookings, courses, files, history, labs, progress, sessions, teams, users } from "@/db/schema";
 import { addDays, dayKey, nextSaturday, slotISO, type PublicUser, type Role, type WorkspaceData } from "@/lib/types";
 
