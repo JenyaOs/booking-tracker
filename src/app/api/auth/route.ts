@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { getDb } from "@/lib/db";
 import { users } from "@/db/schema";
 import { AppError, checkOrigin, createSession, demoUser, endSession, ensureSeed, getWorkspace, publicUser, verifyPassword } from "@/lib/server";
 import type { Role } from "@/lib/types";
@@ -20,6 +20,7 @@ export async function POST(request: Request) {
     const key = `${request.headers.get("x-forwarded-for") ?? "local"}:${input.username.toLowerCase()}`;
     const prior = attempts.get(key); const current = prior && prior.expires > Date.now() ? prior : { count: 0, expires: Date.now() + 15 * 60000 };
     if (current.count >= 8) throw new AppError("Слишком много попыток. Попробуйте через 15 минут", 429);
+    const db = getDb();
     const [record] = await db.select().from(users).where(eq(users.username, input.username.trim())).limit(1);
     if (!record || !verifyPassword(input.password, record.passwordHash)) { current.count++; attempts.set(key, current); throw new AppError("Неверный логин или пароль", 401); }
     attempts.delete(key); await createSession(record.id);

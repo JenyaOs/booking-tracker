@@ -1,7 +1,7 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { getDb } from "@/lib/db";
 import { bookings, courses, files, history, labs, progress, teams, users } from "@/db/schema";
 import { ACTIVE_STATUSES, LAB_LABELS, BOOKING_LABELS, LIMIT_MESSAGE, dayKey, formatDate, timeLabel, type LabStatus, type PublicUser } from "@/lib/types";
 import { AppError, hashPassword } from "@/lib/server";
@@ -21,6 +21,7 @@ export async function mutateWorkspace(user: PublicUser, input: Input, file?: Fil
     if (bytes.subarray(0, 5).toString() !== "%PDF-") throw new AppError("Файл не является корректным PDF");
     uploaded = { name: file.name.replace(/[\\/\u0000-\u001f]/g, "_").slice(0, 200), size: file.size, data: bytes.toString("base64") };
   }
+  const db = getDb();
   return db.transaction(async tx => {
     // One transaction lock serializes booking mutations, protecting both the
     // per-team limit and atomic rescheduling. The unique index is a second guard.

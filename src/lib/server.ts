@@ -2,7 +2,7 @@ import "server-only";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { getDb } from "@/lib/db";
 import { bookings, courses, files, history, labs, progress, sessions, teams, users } from "@/db/schema";
 import { addDays, dayKey, nextSaturday, slotISO, type PublicUser, type Role, type WorkspaceData } from "@/lib/types";
 
@@ -24,6 +24,7 @@ function examplePdf() {
 let seedPromise: Promise<void> | undefined;
 export async function ensureSeed() {
   if (seedPromise) return seedPromise;
+  const db = getDb();
   seedPromise = db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(710001)`);
     if ((await tx.select({ id: users.id }).from(users).where(eq(users.username, "demo.student")).limit(1)).length) return;
@@ -64,24 +65,27 @@ export async function ensureSeed() {
 export async function getCurrentUser(): Promise<PublicUser | null> {
   const token = (await cookies()).get("pary_session")?.value;
   if (!token) return null;
+  const db = getDb();
   const [row] = await db.select({ user: users }).from(sessions).innerJoin(users, eq(sessions.userId, users.id)).where(and(eq(sessions.tokenHash, tokenHash(token)), gt(sessions.expiresAt, new Date()))).limit(1);
   return row ? publicUser(row.user) : null;
 }
 export async function requireUser() { const user = await getCurrentUser(); if (!user) throw new AppError("Войдите в аккаунт, чтобы продолжить", 401); return user; }
-export async function demoUser(role: Role) { await ensureSeed(); const [user] = await db.select().from(users).where(eq(users.username, `demo.${role}`)).limit(1); if (!user) throw new AppError("Аккаунт не найден", 404); return publicUser(user); }
+export async function demoUser(role: Role) { await ensureSeed(); const db = getDb(); const [user] = await db.select().from(users).where(eq(users.username, `demo.${role}`)).limit(1); if (!user) throw new AppError("Аккаунт не найден", 404); return publicUser(user); }
 export async function createSession(userId: string) {
   const token = randomBytes(32).toString("hex");
   const jar = await cookies(); const old = jar.get("pary_session")?.value;
+  const db = getDb();
   if (old) await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash(old)));
   await db.insert(sessions).values({ tokenHash: tokenHash(token), userId, expiresAt: new Date(Date.now() + 7 * 86400000) });
   jar.set("pary_session", token, { httpOnly: true, sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", secure: process.env.NODE_ENV === "production", partitioned: process.env.NODE_ENV === "production", maxAge: 7 * 86400, path: "/" });
 }
-export async function endSession() { const jar = await cookies(); const token = jar.get("pary_session")?.value; if (token) await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash(token))); jar.set("pary_session", "", { httpOnly: true, sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", secure: process.env.NODE_ENV === "production", partitioned: process.env.NODE_ENV === "production", maxAge: 0, path: "/" }); }
+export async function endSession() { const jar = await cookies(); const token = jar.get("pary_session")?.value; if (token) { const db = getDb(); await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash(token))); } jar.set("pary_session", "", { httpOnly: true, sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", secure: process.env.NODE_ENV === "production", partitioned: process.env.NODE_ENV === "production", maxAge: 0, path: "/" }); }
 export function checkOrigin(request: Request) { const origin = request.headers.get("origin"); if (!origin) return; const host = new URL(origin).host; if (![request.headers.get("host"), request.headers.get("x-forwarded-host"), new URL(request.url).host].includes(host)) throw new AppError("Запрос с другого сайта запрещён", 403); }
 
 export async function getWorkspace(user: PublicUser, authenticated = true): Promise<WorkspaceData> {
   const student = user.role === "student";
   const teamId = user.teamId ?? -1;
+  const db = getDb();
   const [allCourses, allTeams, allLabs, allProgress, allBookings, allFiles, allHistory] = await Promise.all([
     db.select().from(courses).orderBy(asc(courses.id)),
     db.select({ id: teams.id, number: teams.number, size: teams.size, members: teams.members, consentAt: teams.consentAt, createdAt: teams.createdAt }).from(teams).where(student ? eq(teams.id, teamId) : undefined).orderBy(asc(teams.number)),
